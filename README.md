@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Flutter-3.13%2B-02569B?logo=flutter&logoColor=white" alt="Flutter" />
   <img src="https://img.shields.io/badge/Dart-3.1%2B-0175C2?logo=dart&logoColor=white" alt="Dart" />
   <img src="https://img.shields.io/badge/Plataformas-Android%20%7C%20iOS%20%7C%20Web%20%7C%20Windows-blue" alt="Plataformas" />
-  <img src="https://img.shields.io/badge/Licencia-Privada-red" alt="Licencia" />
+  <a href="https://github.com/toroc07/wearup"><img src="https://img.shields.io/badge/GitHub-toroc07%2Fwearup-181717?logo=github&logoColor=white" alt="GitHub Repo" /></a>
   <img src="https://img.shields.io/badge/Versi%C3%B3n-1.0.0%2B1-success" alt="Versión" />
 </p>
 
@@ -33,6 +33,7 @@
 7. [Requisitos Previos e Instalación](#requisitos-previos-e-instalación)
 8. [Ejecución de Pruebas](#ejecución-de-pruebas)
 9. [Persistencia y Datos](#persistencia-y-datos)
+10. [Repositorio y Autor](#repositorio-y-autor)
 
 ---
 
@@ -205,7 +206,7 @@ La autenticación simula roles en tiempo de ejecución sin dependencias externas
 
 1. **Clonar o descargar el repositorio:**
    ```bash
-   git clone <URL_DEL_REPOSITORIO>
+   git clone https://github.com/toroc07/wearup.git
    cd wearup
    ```
 
@@ -250,3 +251,11 @@ flutter test
 ## Persistencia y Datos
 
 Los datos de la aplicación se guardan localmente bajo la clave `'wearup_data'` utilizando [`shared_preferences`](file:///c:/Users/carli/Documents/Desarrollo%20de%20Software/wearup/pubspec.yaml#L37). Al abrir la app por primera vez, se cargan productos iniciales de muestra (chaquetas denim, camisetas, jeans slim, calzado urbano y bolsos) junto con pedidos históricos de demostración. Cualquier cambio posterior (nuevos pedidos, cambios de stock o edición de productos) se preserva automáticamente entre sesiones.
+
+---
+
+## Repositorio y Autor
+
+* **Repositorio oficial en GitHub:** [https://github.com/toroc07/wearup](https://github.com/toroc07/wearup)
+* **Desarrollador / Propietario:** [@toroc07](https://github.com/toroc07)
+* **ID de Aplicación / Namespace:** `com.wearup.wearup`

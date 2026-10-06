@@ -77,7 +77,7 @@ class HomeScreen extends StatelessWidget {
                         child: Column(children: [
                           AspectRatio(aspectRatio: 1, child: PhotoPlaceholder(tint: catTints[i], radius: 14, iconSize: 24)),
                           const SizedBox(height: 8),
-                          Text(kCategories[i], style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: kNavy)),
+                          FittedBox(fit: BoxFit.scaleDown, child: Text(kCategories[i], style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: kNavy))),
                         ]),
                       ),
                     ),
@@ -282,7 +282,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       foregroundColor: kNavy,
                       side: const BorderSide(color: kBorder),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                      textStyle: const TextStyle(fontFamily: 'Montserrat', fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),
@@ -345,7 +345,7 @@ class ProductCard extends StatelessWidget {
         StockLabel(p.status),
         const SizedBox(height: 8),
         FilledButton(
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), textStyle: const TextStyle(fontFamily: 'Montserrat', fontSize: 14, fontWeight: FontWeight.w700)),
           onPressed: p.status == Stock.out
               ? null
               : () {

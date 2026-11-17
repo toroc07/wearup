@@ -71,6 +71,9 @@ class Product {
       );
 
   Stock get status => stock <= 0 ? Stock.out : (stock <= 5 ? Stock.low : Stock.available);
+
+  // Copia independiente (para guardar en los pedidos)
+  Product copy() => Product.fromJson(toJson());
 }
 
 // Un producto elegido en el carrito (con color, talla y cantidad)
@@ -82,7 +85,9 @@ class CartItem {
   CartItem(this.product, this.color, this.size, this.qty);
   int get total => product.price * qty;
 
-  // Se guarda una copia del producto para que el pedido no cambie si luego se edita o elimina
+  // Copia con el producto congelado: el pedido no cambia si luego se edita o elimina
+  CartItem snapshot() => CartItem(product.copy(), color, size, qty);
+
   Map<String, dynamic> toJson() => {'p': product.toJson(), 'c': color.toJson(), 's': size, 'q': qty};
   factory CartItem.fromJson(Map<String, dynamic> j) =>
       CartItem(Product.fromJson(j['p']), ProductColor.fromJson(j['c']), j['s'], j['q']);
@@ -235,7 +240,7 @@ class AppState extends ChangeNotifier {
 
   // Datos de ejemplo del prototipo (pedidos anteriores)
   void _seed() {
-    final dim = products;
+    final dim = [for (final p in products) p.copy()];
     orders.addAll([
       Order(
         number: 1024, date: DateTime(2026, 9, 18), items: [CartItem(dim[1], dim[1].colors[0], 'M', 1)], subtotal: 59900, shipping: 0,
@@ -308,19 +313,38 @@ class AppState extends ChangeNotifier {
   int get shipping => cart.isEmpty ? 0 : kShipping;
   int get total => subtotal + shipping;
 
-  // Agrega al carrito; si ya existe, suma la cantidad
-  void addToCart(Product p, ProductColor c, String size, int qty) {
-    final existing = cart.where((i) => i.product == p && i.color == c && i.size == size);
-    if (existing.isNotEmpty) {
-      existing.first.qty = (existing.first.qty + qty).clamp(1, p.stock);
-    } else {
-      cart.add(CartItem(p, c, size, qty));
-    }
-    notifyListeners();
+  // Unidades de un producto en el carrito, sumando todos sus colores y tallas
+  // (el stock es por producto, no por variante)
+  int inCart(Product p) => cart.where((i) => i.product == p).fold(0, (s, i) => s + i.qty);
+
+  // Unidades que todavía se pueden agregar de un producto
+  int remaining(Product p) {
+    final r = p.stock - inCart(p);
+    return r < 0 ? 0 : r;
   }
 
+  // true si ningún producto del carrito supera su stock actual
+  bool get cartFitsStock => cart.every((i) => inCart(i.product) <= i.product.stock);
+
+  // Agrega al carrito sin pasar del stock; si la variante ya existe, suma la cantidad.
+  // Devuelve cuántas unidades se agregaron (0 si no quedaba stock)
+  int addToCart(Product p, ProductColor c, String size, int qty) {
+    final add = qty.clamp(0, remaining(p));
+    if (add == 0) return 0;
+    final existing = cart.where((i) => i.product == p && i.color == c && i.size == size);
+    if (existing.isNotEmpty) {
+      existing.first.qty += add;
+    } else {
+      cart.add(CartItem(p, c, size, add));
+    }
+    notifyListeners();
+    return add;
+  }
+
+  // Cambia la cantidad de un ítem respetando el stock que dejan libre los demás ítems del mismo producto
   void setQty(CartItem i, int qty) {
-    i.qty = qty.clamp(1, i.product.stock < 1 ? 1 : i.product.stock);
+    final max = i.product.stock - (inCart(i.product) - i.qty);
+    i.qty = qty.clamp(1, max < 1 ? 1 : max);
     notifyListeners();
   }
 
@@ -329,12 +353,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Crea el pedido, descuenta el stock y vacía el carrito
-  Order placeOrder({required String address, required String customer, required String phone, required String receipt}) {
+  // Crea el pedido, descuenta el stock y vacía el carrito.
+  // Devuelve null (sin cambiar nada) si el carrito pide más unidades de las que hay
+  Order? placeOrder({required String address, required String customer, required String phone, required String receipt}) {
+    if (cart.isEmpty || !cartFitsStock) return null;
     final order = Order(
       number: _nextOrder++,
       date: DateTime.now(),
-      items: List.of(cart),
+      items: [for (final i in cart) i.snapshot()],
       subtotal: subtotal,
       shipping: shipping,
       address: address,
@@ -345,7 +371,7 @@ class AppState extends ChangeNotifier {
       receipt: receipt,
     );
     for (final i in cart) {
-      i.product.stock = (i.product.stock - i.qty).clamp(0, 1 << 30);
+      i.product.stock -= i.qty;
     }
     orders.insert(0, order);
     cart.clear();

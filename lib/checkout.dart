@@ -48,8 +48,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // Para comprar hay que haber iniciado sesión
+  void _showStockError() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Algunos productos ya no tienen suficientes unidades. Ajusta tu carrito.')));
+  }
+
+  // Para comprar hay que haber iniciado sesión y no pedir más unidades de las disponibles
   Future<void> _continueFromCart() async {
+    if (!app.cartFitsStock) return _showStockError();
     if (!app.loggedIn) {
       final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const LoginScreen()));
       if (ok != true || !mounted) return;
@@ -62,11 +69,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (_form.currentState!.validate()) setState(() => _step = 2);
   }
 
-  // Crea el pedido y pasa a la confirmación
+  // Crea el pedido y pasa a la confirmación; si el stock cambió, vuelve al carrito
   void _sendReceipt() {
     final address = '${_address.text.trim()}, ${_city.text.trim()}, ${_dept.text.trim()}';
+    final order = app.placeOrder(address: address, customer: _name.text.trim(), phone: _phone.text.trim(), receipt: _receipt!);
+    if (order == null) {
+      setState(() => _step = 0);
+      return _showStockError();
+    }
     setState(() {
-      _order = app.placeOrder(address: address, customer: _name.text.trim(), phone: _phone.text.trim(), receipt: _receipt!);
+      _order = order;
       _step = 4;
     });
   }
@@ -194,6 +206,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     InkWell(onTap: () => app.removeItem(i), child: const Icon(Icons.delete_outline, color: kRed)),
                   ]),
                   Text('${i.color.name} · Talla ${i.size}', style: const TextStyle(color: kMuted, fontSize: 13)),
+                  if (app.inCart(i.product) > i.product.stock)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        i.product.stock == 0 ? 'Agotado: quítalo del carrito' : 'Solo quedan ${i.product.stock} unidades de este producto',
+                        style: const TextStyle(color: kRed, fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                    ),
                   const SizedBox(height: 10),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     QtyStepper(value: i.qty, compact: true, onChanged: (v) => app.setQty(i, v)),
@@ -265,7 +285,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             const SizedBox(width: 8),
             InkWell(
               onTap: () {
-                Clipboard.setData(const ClipboardData(text: '3001234567'));
+                Clipboard.setData(ClipboardData(text: _breKey.replaceAll(' ', '')));
                 ScaffoldMessenger.of(context)
                   ..hideCurrentSnackBar()
                   ..showSnackBar(const SnackBar(content: Text('Llave copiada')));

@@ -155,6 +155,19 @@ class HomeScreen extends StatelessWidget {
 void openProduct(BuildContext context, Product p) =>
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProductDetailScreen(product: p)));
 
+// Agrega al carrito y avisa cuántas unidades entraron según el stock disponible
+void addAndNotify(BuildContext context, Product p, ProductColor c, String size, int qty) {
+  final added = app.addToCart(p, c, size, qty);
+  final msg = added == 0
+      ? 'Ya tienes en el carrito todas las unidades disponibles de ${p.name}'
+      : added < qty
+          ? 'Solo quedaban $added unidades de ${p.name}: se agregaron al carrito'
+          : '${p.name} agregado al carrito';
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(msg)));
+}
+
 // ---------------------------------------------------------------- Catálogo
 
 // Catálogo con búsqueda y filtros por categoría, talla, color y precio
@@ -348,12 +361,7 @@ class ProductCard extends StatelessWidget {
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), textStyle: const TextStyle(fontFamily: 'Montserrat', fontSize: 14, fontWeight: FontWeight.w700)),
           onPressed: p.status == Stock.out
               ? null
-              : () {
-                  app.addToCart(p, p.colors.first, p.sizes.first, 1);
-                  ScaffoldMessenger.of(context)
-                    ..hideCurrentSnackBar()
-                    ..showSnackBar(SnackBar(content: Text('${p.name} agregado al carrito')));
-                },
+              : () => addAndNotify(context, p, p.colors.first, p.sizes.first, 1),
           child: Text(p.status == Stock.out ? 'No disponible' : 'Agregar al carrito'),
         ),
       ]),
@@ -501,7 +509,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   Row(children: [
                     Icon(Icons.lock_outline, size: 22, color: kNavy),
                     SizedBox(width: 12),
-                    Expanded(child: Text('Pago seguro con pasarela externa')),
+                    Expanded(child: Text('Pago por transferencia BRE-B con comprobante')),
                   ]),
                 ]),
               ),
@@ -516,12 +524,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           child: FilledButton.icon(
             onPressed: out
                 ? null
-                : () {
-                    app.addToCart(p, _color, _size, _qty);
-                    ScaffoldMessenger.of(context)
-                      ..hideCurrentSnackBar()
-                      ..showSnackBar(SnackBar(content: Text('${p.name} agregado al carrito')));
-                  },
+                : () => addAndNotify(context, p, _color, _size, _qty),
             icon: const Icon(Icons.shopping_bag_outlined),
             label: Text(out ? 'No disponible' : 'Agregar al carrito'),
           ),

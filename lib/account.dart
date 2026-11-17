@@ -325,7 +325,7 @@ class TrackingScreen extends StatelessWidget {
       builder: (context, _) {
         final o = order;
         const names = ['Confirmado', 'En preparación', 'Enviado', 'Entregado'];
-        const hints = ['Recibimos tu pago', 'Estamos alistando tu pedido', 'Tu pedido va en camino', 'Pedido entregado'];
+        final hints = [o.paid ? 'Pago validado' : 'Estamos validando tu pago', 'Estamos alistando tu pedido', 'Tu pedido va en camino', 'Pedido entregado'];
         return Scaffold(
           appBar: AppBar(title: const Text('Seguimiento')),
           body: ListView(padding: const EdgeInsets.all(16), children: [

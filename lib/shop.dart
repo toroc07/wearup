@@ -25,6 +25,13 @@ class HomeScreen extends StatelessWidget {
         final featured = app.products.take(4).toList();
         const catTints = [Color(0xFFE6ECF6), Color(0xFFD9E7F2), Color(0xFFDDEFEA), Color(0xFFD5EBF1)];
         final cats = app.categories;
+        // Imagen de cada categoría (assets/categorias); sin imagen se muestra el recuadro
+        const categoryImages = {
+          'Ropa': 'assets/categorias/ropa.jpg',
+          'Jeans': 'assets/categorias/jeans.jpg',
+          'Zapatos': 'assets/categorias/zapatos.jpg',
+          'Accesorios': 'assets/categorias/accesorios.jpg',
+        };
         return Scaffold(
           appBar: AppBar(
             automaticallyImplyLeading: false,
@@ -52,7 +59,21 @@ class HomeScreen extends StatelessWidget {
                   decoration: BoxDecoration(color: const Color(0xFFD3E2F0), borderRadius: BorderRadius.circular(20)),
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
-                    const Expanded(child: Center(child: PhotoPlaceholder(label: 'Foto de moda · portada', tint: Colors.transparent))),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: double.infinity,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(colors: [Color(0xFFF9BAAB), Color(0xFFEB949D)]),
+                            ),
+                            child: Image.asset('assets/portada.jpg', fit: BoxFit.contain),
+                          ),
+                        ),
+                      ),
+                    ),
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
@@ -79,7 +100,15 @@ class HomeScreen extends StatelessWidget {
                         child: Padding(
                           padding: EdgeInsets.only(right: i == cats.length - 1 ? 0 : 8),
                           child: Column(children: [
-                            AspectRatio(aspectRatio: 1, child: PhotoPlaceholder(tint: catTints[i % catTints.length], radius: 14, iconSize: 24)),
+                            AspectRatio(
+                              aspectRatio: 1,
+                              child: categoryImages[cats[i].name] == null
+                                  ? PhotoPlaceholder(tint: catTints[i % catTints.length], radius: 14, iconSize: 24)
+                                  : ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: Image.asset(categoryImages[cats[i].name]!, fit: BoxFit.cover),
+                                    ),
+                            ),
                             const SizedBox(height: 8),
                             FittedBox(fit: BoxFit.scaleDown, child: Text(cats[i].name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: kNavy))),
                           ]),

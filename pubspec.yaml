@@ -59,6 +59,8 @@ flutter:
   # Logo e imágenes
   assets:
     - assets/logo.png
+    - assets/portada.jpg
+    - assets/categorias/
 
   # Tipografía de la marca
   fonts:

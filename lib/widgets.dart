@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'checkout.dart';
 import 'state.dart';
@@ -31,9 +32,52 @@ class PhotoPlaceholder extends StatelessWidget {
         if (label != null) ...[
           const SizedBox(height: 6),
           Text(label!.toUpperCase(),
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.w700, color: kNavy.withValues(alpha: .6))),
         ],
       ]),
+    );
+  }
+}
+
+// Foto de un producto desde el almacenamiento; sin foto (o si falla la carga) muestra el recuadro
+class ProductPhoto extends StatelessWidget {
+  final String? path;
+  final Color tint;
+  final String? label;
+  final double radius;
+  final double iconSize;
+
+  const ProductPhoto({super.key, required this.path, required this.tint, this.label, this.radius = 12, this.iconSize = 28});
+
+  // Foto número [index] de un producto (o el recuadro si no tiene)
+  factory ProductPhoto.of(Product p, {Key? key, int index = 0, String? label, double radius = 12, double iconSize = 28}) => ProductPhoto(
+        key: key,
+        path: p.images.length > index ? p.images[index] : null,
+        tint: p.tintColor,
+        label: label,
+        radius: radius,
+        iconSize: iconSize,
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = PhotoPlaceholder(label: label, tint: tint, radius: radius, iconSize: iconSize);
+    final imagePath = path;
+    if (imagePath == null) return placeholder;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Container(
+        color: tint,
+        child: Image.network(
+          app.imageUrl(imagePath),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, _, _) => placeholder,
+          loadingBuilder: (context, child, progress) => progress == null ? child : placeholder,
+        ),
+      ),
     );
   }
 }
@@ -161,6 +205,13 @@ class LabeledField extends StatelessWidget {
   }
 }
 
+// Validadores compartidos
+String? validateEmail(String? v) =>
+    (v == null || !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v.trim())) ? 'Ingresa un correo válido' : null;
+String? validatePhone(String? v) =>
+    (v == null || v.replaceAll(RegExp(r'\D'), '').length < 7) ? 'Ingresa un teléfono válido' : null;
+String? validatePassword(String? v) => (v == null || v.length < 6) ? 'Mínimo 6 caracteres' : null;
+
 // Selector de cantidad con botones - y +
 class QtyStepper extends StatelessWidget {
   final int value;
@@ -171,17 +222,17 @@ class QtyStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final h = compact ? 44.0 : 50.0;
-    Widget btn(IconData i, VoidCallback f) => InkWell(
+    Widget btn(IconData i, String tip, VoidCallback f) => InkWell(
           onTap: f,
           borderRadius: BorderRadius.circular(8),
-          child: SizedBox(width: h, height: h, child: Icon(i, size: 20, color: kNavy)),
+          child: Tooltip(message: tip, child: SizedBox(width: h, height: h, child: Icon(i, size: 20, color: kNavy))),
         );
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        btn(Icons.remove, () => onChanged(value - 1)),
+        btn(Icons.remove, 'Quitar una', () => onChanged(value - 1)),
         SizedBox(width: 36, child: Text('$value', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
-        btn(Icons.add, () => onChanged(value + 1)),
+        btn(Icons.add, 'Agregar una', () => onChanged(value + 1)),
       ]),
     );
   }
@@ -224,4 +275,76 @@ class BottomBar extends StatelessWidget {
       child: SafeArea(top: false, child: child),
     );
   }
+}
+
+void showMessage(BuildContext context, String text) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
+}
+
+/// Ejecuta una operación contra el servidor y muestra el error si falla.
+/// Devuelve true si salió bien.
+Future<bool> runAction(BuildContext context, Future<void> Function() action, {String? success}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await action();
+    if (success != null) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(success)));
+    }
+    return true;
+  } on BackendException catch (e) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(e.message), backgroundColor: kRed));
+    return false;
+  }
+}
+
+const _maxImageBytes = 10 * 1024 * 1024;
+
+/// Pide una imagen de la galería o de la cámara (si el dispositivo la tiene).
+/// Devuelve null si el usuario cancela. Las pruebas lo reemplazan por una imagen fija.
+Future<PickedImage?> Function(BuildContext context) pickImage = _pickFromDevice;
+
+Future<PickedImage?> _pickFromDevice(BuildContext context) async {
+  final picker = ImagePicker();
+  var source = ImageSource.gallery;
+  if (picker.supportsImageSource(ImageSource.camera)) {
+    final chosen = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Elegir de la galería'),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Tomar una foto'),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+        ]),
+      ),
+    );
+    if (chosen == null) return null;
+    source = chosen;
+  }
+  final file = await picker.pickImage(source: source, maxWidth: 1800, imageQuality: 85);
+  if (file == null) return null;
+  final bytes = await file.readAsBytes();
+  final image = PickedImage(bytes, file.name);
+  if (!context.mounted) return null;
+  if (!const {'jpg', 'png', 'webp'}.contains(image.extension)) {
+    showMessage(context, 'Formato no permitido. Usa una imagen JPG o PNG.');
+    return null;
+  }
+  if (bytes.length > _maxImageBytes) {
+    showMessage(context, 'La imagen supera los 10 MB.');
+    return null;
+  }
+  return image;
 }

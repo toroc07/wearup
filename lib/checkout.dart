@@ -7,9 +7,8 @@ import 'theme.dart';
 import 'widgets.dart';
 
 const _steps = ['Carrito', 'Envío', 'Pago', 'Comprobante', 'Confirmación'];
-const _breKey = '300 123 4567';
 
-/// Flujo de compra de 5 pasos: carrito, envío, pago, comprobante y confirmación.
+/// Flujo de compra de 5 pasos: carrito, envío, pago (llave BRE-B), comprobante y confirmación.
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
 
@@ -27,7 +26,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _city = TextEditingController();
   final _dept = TextEditingController();
   final _notes = TextEditingController();
-  String? _receipt;
+  PickedImage? _receipt;
+  bool _sending = false;
   Order? _order;
 
   @override
@@ -41,6 +41,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   String get _title => const ['Carrito', 'Envío', 'Pago', 'Comprobante', ''][_step];
 
   void _back() {
+    if (_sending) return;
     if (_step == 0 || _step == 4) {
       Navigator.of(context).pop();
     } else {
@@ -48,18 +49,20 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  void _showStockError() {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Algunos productos ya no tienen suficientes unidades. Ajusta tu carrito.')));
-  }
-
   // Para comprar hay que haber iniciado sesión y no pedir más unidades de las disponibles
   Future<void> _continueFromCart() async {
-    if (!app.cartFitsStock) return _showStockError();
+    if (!app.cartFitsStock) {
+      return showMessage(context, 'Algunos productos ya no tienen suficientes unidades. Ajusta tu carrito.');
+    }
     if (!app.loggedIn) {
       final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const LoginScreen()));
       if (ok != true || !mounted) return;
+    }
+    // Precarga nombre y teléfono del perfil
+    final p = app.profile;
+    if (p != null) {
+      if (_name.text.isEmpty) _name.text = p.fullName;
+      if (_phone.text.isEmpty) _phone.text = p.phone;
     }
     setState(() => _step = 1);
   }
@@ -69,24 +72,45 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (_form.currentState!.validate()) setState(() => _step = 2);
   }
 
-  // Crea el pedido y pasa a la confirmación; si el stock cambió, vuelve al carrito
-  void _sendReceipt() {
-    final address = '${_address.text.trim()}, ${_city.text.trim()}, ${_dept.text.trim()}';
-    final order = app.placeOrder(address: address, customer: _name.text.trim(), phone: _phone.text.trim(), receipt: _receipt!);
-    if (order == null) {
-      setState(() => _step = 0);
-      return _showStockError();
+  Future<void> _pickReceipt() async {
+    final image = await pickImage(context);
+    if (image != null && mounted) setState(() => _receipt = image);
+  }
+
+  // Sube el comprobante, crea el pedido en el servidor y pasa a la confirmación
+  Future<void> _sendReceipt() async {
+    setState(() => _sending = true);
+    try {
+      final order = await app.placeOrder(
+        shippingInfo: ShippingInfo(
+          customerName: _name.text.trim(),
+          phone: _phone.text.trim(),
+          address: _address.text.trim(),
+          city: _city.text.trim(),
+          department: _dept.text.trim(),
+          notes: _notes.text.trim(),
+        ),
+        receipt: _receipt!,
+      );
+      if (!mounted) return;
+      setState(() {
+        _order = order;
+        _step = 4;
+      });
+    } on BackendException catch (e) {
+      if (!mounted) return;
+      // Si el problema es de stock se vuelve al carrito para ajustarlo
+      if (!app.cartFitsStock || app.cart.isEmpty) setState(() => _step = 0);
+      showMessage(context, e.message);
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
-    setState(() {
-      _order = order;
-      _step = 4;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step == 0 || _step == 4,
+      canPop: !_sending && (_step == 0 || _step == 4),
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back();
       },
@@ -139,7 +163,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       case 2:
         return BottomBar(child: FilledButton(onPressed: () => setState(() => _step = 3), child: const Text('Ya transferí, continuar')));
       case 3:
-        return BottomBar(child: FilledButton(onPressed: _receipt == null ? null : _sendReceipt, child: const Text('Enviar comprobante')));
+        return BottomBar(
+          child: FilledButton(
+            onPressed: _receipt == null || _sending ? null : _sendReceipt,
+            child: _sending
+                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                : const Text('Enviar comprobante'),
+          ),
+        );
       default:
         return BottomBar(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -197,20 +228,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           child: Card2(
             padding: const EdgeInsets.all(12),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SizedBox(width: 88, height: 112, child: PhotoPlaceholder(tint: i.product.tint, iconSize: 26)),
+              SizedBox(width: 88, height: 112, child: ProductPhoto.of(i.product, iconSize: 26)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Expanded(child: Text(i.product.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kNavy))),
-                    InkWell(onTap: () => app.removeItem(i), child: const Icon(Icons.delete_outline, color: kRed)),
+                    IconButton(
+                      tooltip: 'Quitar del carrito',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => app.removeItem(i),
+                      icon: const Icon(Icons.delete_outline, color: kRed),
+                    ),
                   ]),
-                  Text('${i.color.name} · Talla ${i.size}', style: const TextStyle(color: kMuted, fontSize: 13)),
-                  if (app.inCart(i.product) > i.product.stock)
+                  Text('${i.variant.colorName} · Talla ${i.variant.size}', style: const TextStyle(color: kMuted, fontSize: 13)),
+                  if (i.qty > i.variant.stock)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        i.product.stock == 0 ? 'Agotado: quítalo del carrito' : 'Solo quedan ${i.product.stock} unidades de este producto',
+                        i.variant.stock == 0 ? 'Agotado: quítalo del carrito' : 'Solo quedan ${i.variant.stock} unidades en esta talla y color',
                         style: const TextStyle(color: kRed, fontSize: 12, fontWeight: FontWeight.w700),
                       ),
                     ),
@@ -230,21 +266,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   // Paso 2
   Widget _shippingStep() {
-    String? req(String? v) => (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null;
     return Form(
       key: _form,
       child: ListView(padding: const EdgeInsets.all(16), children: [
         const Text('Dirección de envío', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: kNavy)),
         const SizedBox(height: 14),
         LabeledField(label: 'Nombre completo', hint: 'Nombre y apellido', controller: _name),
-        LabeledField(
-          label: 'Teléfono de contacto',
-          hint: 'Número de celular',
-          controller: _phone,
-          keyboard: TextInputType.phone,
-          validator: (v) => (v == null || v.replaceAll(RegExp(r'\D'), '').length < 7) ? 'Ingresa un teléfono válido' : null,
-        ),
-        LabeledField(label: 'Dirección de entrega', hint: 'Calle, número y complemento', controller: _address, validator: req),
+        LabeledField(label: 'Teléfono de contacto', hint: 'Número de celular', controller: _phone, keyboard: TextInputType.phone, validator: validatePhone),
+        LabeledField(label: 'Dirección de entrega', hint: 'Calle, número y complemento', controller: _address),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: LabeledField(label: 'Ciudad', hint: 'Ciudad', controller: _city)),
           const SizedBox(width: 12),
@@ -257,6 +286,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   // Paso 3
   Widget _paymentStep() {
+    final key = app.settings.breBKey;
     return ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Método de pago', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: kNavy)),
       const SizedBox(height: 12),
@@ -281,16 +311,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           const Text('Llave BRE-B', style: TextStyle(color: kMuted)),
           Row(children: [
-            const Text(_breKey, style: TextStyle(fontWeight: FontWeight.w800, color: kNavy, fontSize: 16)),
-            const SizedBox(width: 8),
-            InkWell(
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: _breKey.replaceAll(' ', '')));
-                ScaffoldMessenger.of(context)
-                  ..hideCurrentSnackBar()
-                  ..showSnackBar(const SnackBar(content: Text('Llave copiada')));
+            Text(key, style: const TextStyle(fontWeight: FontWeight.w800, color: kNavy, fontSize: 16)),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Copiar llave',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: key.replaceAll(' ', '')));
+                showMessage(context, 'Llave copiada');
               },
-              child: const Icon(Icons.copy, size: 18, color: kBlue),
+              icon: const Icon(Icons.copy, size: 18, color: kBlue),
             ),
           ]),
         ]),
@@ -320,6 +349,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             Text(v, style: TextStyle(fontWeight: FontWeight.w800, color: kNavy, fontSize: big ? 20 : 16)),
           ]),
         );
+    final receipt = _receipt;
     return ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Sube tu comprobante', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: kNavy)),
       const SizedBox(height: 6),
@@ -329,9 +359,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       Card2(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Column(children: [
-          row('Llave BRE-B', _breKey),
+          row('Llave BRE-B', app.settings.breBKey),
           const Divider(height: 1, color: kBorder),
-          row('Beneficiario', 'WearUp SAS'),
+          row('Beneficiario', app.settings.breBHolder),
           const Divider(height: 1, color: kBorder),
           row('Monto a transferir', fmtPrice(app.total), big: true),
         ]),
@@ -339,28 +369,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       const SizedBox(height: 16),
       InkWell(
         borderRadius: BorderRadius.circular(16),
-        // Simulación del selector de archivos de galería/cámara.
-        onTap: () => setState(() => _receipt = 'comprobante_${DateTime.now().millisecondsSinceEpoch % 100000}.jpg'),
+        onTap: _sending ? null : _pickReceipt,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _receipt == null ? kBlue.withValues(alpha: .6) : kGreen, width: 1.5),
+            border: Border.all(color: receipt == null ? kBlue.withValues(alpha: .6) : kGreen, width: 1.5),
           ),
           child: Column(children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: _receipt == null ? const Color(0xFFEAF2FB) : const Color(0xFFD7F0E0),
-              child: Icon(_receipt == null ? Icons.cloud_upload_outlined : Icons.check, color: _receipt == null ? kBlue : kGreen, size: 28),
-            ),
+            if (receipt == null)
+              const CircleAvatar(radius: 28, backgroundColor: Color(0xFFEAF2FB), child: Icon(Icons.cloud_upload_outlined, color: kBlue, size: 28))
+            else
+              ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.memory(receipt.bytes, height: 160, fit: BoxFit.contain)),
             const SizedBox(height: 12),
-            Text(_receipt == null ? 'Sube una foto del comprobante' : 'Comprobante adjunto',
+            Text(receipt == null ? 'Sube una foto del comprobante' : 'Comprobante adjunto',
                 style: const TextStyle(fontWeight: FontWeight.w800, color: kNavy)),
             const SizedBox(height: 4),
-            Text(_receipt ?? 'Toca para elegir desde tu galería o tomar una foto',
+            Text(receipt?.name ?? 'Toca para elegir desde tu galería o tomar una foto',
                 textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13)),
-            if (_receipt != null) ...[
+            if (receipt != null) ...[
               const SizedBox(height: 4),
               const Text('Toca para cambiarlo', style: TextStyle(color: kBlue, fontSize: 12, fontWeight: FontWeight.w700)),
             ],
@@ -381,7 +409,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       const SizedBox(height: 20),
       const Center(child: Text('Compra confirmada', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: kNavy))),
       const SizedBox(height: 8),
-      const Text('Te avisaremos en la app cada vez que cambie el estado de tu pedido.',
+      const Text('Validaremos tu comprobante y te avisaremos en la app cada vez que cambie el estado de tu pedido.',
           textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 15, height: 1.35)),
       const SizedBox(height: 20),
       Card2(

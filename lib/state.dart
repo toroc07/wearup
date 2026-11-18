@@ -1,349 +1,143 @@
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
-import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'backend.dart';
+import 'models.dart';
 
-// Estado de disponibilidad de un producto
-enum Stock { available, low, out }
+export 'backend.dart';
+export 'models.dart';
 
-enum OrderStatus { confirmed, preparing, shipped, delivered }
-
-extension OrderStatusX on OrderStatus {
-  String get label => const ['Confirmado', 'En preparación', 'Enviado', 'Entregado'][index];
-}
-
-// Un color con su nombre y su tono
-class ProductColor {
-  final String name;
-  final Color color;
-  const ProductColor(this.name, this.color);
-
-  Map<String, dynamic> toJson() => {'n': name, 'c': color.toARGB32()};
-  factory ProductColor.fromJson(Map<String, dynamic> j) => ProductColor(j['n'], Color(j['c']));
-}
-
-const kSizes = ['S', 'M', 'L', 'XL'];
-const kCategories = ['Ropa', 'Jeans', 'Zapatos', 'Accesorios'];
-
-// El molde de los datos de un producto
-class Product {
-  String id, name, category, description;
-  int price, stock;
-  List<ProductColor> colors;
-  List<String> sizes;
-  Color tint;
-
-  Product({
-    required this.id,
-    required this.name,
-    required this.category,
-    required this.price,
-    required this.stock,
-    required this.colors,
-    this.sizes = kSizes,
-    this.description = '',
-    this.tint = const Color(0xFFD3E2F0),
-  });
-
-  // Se calcula según las unidades disponibles
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'category': category,
-        'description': description,
-        'price': price,
-        'stock': stock,
-        'colors': [for (final c in colors) c.toJson()],
-        'sizes': sizes,
-        'tint': tint.toARGB32(),
-      };
-
-  factory Product.fromJson(Map<String, dynamic> j) => Product(
-        id: j['id'],
-        name: j['name'],
-        category: j['category'],
-        description: j['description'],
-        price: j['price'],
-        stock: j['stock'],
-        colors: [for (final c in j['colors']) ProductColor.fromJson(c)],
-        sizes: List<String>.from(j['sizes']),
-        tint: Color(j['tint']),
-      );
-
-  Stock get status => stock <= 0 ? Stock.out : (stock <= 5 ? Stock.low : Stock.available);
-
-  // Copia independiente (para guardar en los pedidos)
-  Product copy() => Product.fromJson(toJson());
-}
-
-// Un producto elegido en el carrito (con color, talla y cantidad)
-class CartItem {
-  final Product product;
-  final ProductColor color;
-  final String size;
-  int qty;
-  CartItem(this.product, this.color, this.size, this.qty);
-  int get total => product.price * qty;
-
-  // Copia con el producto congelado: el pedido no cambia si luego se edita o elimina
-  CartItem snapshot() => CartItem(product.copy(), color, size, qty);
-
-  Map<String, dynamic> toJson() => {'p': product.toJson(), 'c': color.toJson(), 's': size, 'q': qty};
-  factory CartItem.fromJson(Map<String, dynamic> j) =>
-      CartItem(Product.fromJson(j['p']), ProductColor.fromJson(j['c']), j['s'], j['q']);
-}
-
-// Un pedido ya confirmado
-class Order {
-  final int number;
-  final DateTime date;
-  final List<CartItem> items;
-  final int subtotal, shipping;
-  final String address, customer, phone;
-  // Correo del cliente (null en los pedidos de ejemplo, que ve cualquier cliente)
-  final String? email;
-  // Nombre del archivo del comprobante y si el administrador ya validó el pago
-  final String? receipt;
-  bool paid;
-  OrderStatus status;
-
-  Order({
-    required this.number,
-    required this.date,
-    required this.items,
-    required this.subtotal,
-    required this.shipping,
-    required this.address,
-    required this.status,
-    this.customer = '',
-    this.phone = '',
-    this.email,
-    this.receipt,
-    this.paid = false,
-  });
-
-  int get total => subtotal + shipping;
-  int get units => items.fold(0, (s, i) => s + i.qty);
-
-  Map<String, dynamic> toJson() => {
-        'number': number,
-        'date': date.toIso8601String(),
-        'items': [for (final i in items) i.toJson()],
-        'subtotal': subtotal,
-        'shipping': shipping,
-        'address': address,
-        'customer': customer,
-        'phone': phone,
-        'email': email,
-        'receipt': receipt,
-        'paid': paid,
-        'status': status.index,
-      };
-
-  factory Order.fromJson(Map<String, dynamic> j) => Order(
-        number: j['number'],
-        date: DateTime.parse(j['date']),
-        items: [for (final i in j['items']) CartItem.fromJson(i)],
-        subtotal: j['subtotal'],
-        shipping: j['shipping'],
-        address: j['address'],
-        customer: j['customer'],
-        phone: j['phone'],
-        email: j['email'],
-        receipt: j['receipt'],
-        paid: j['paid'],
-        status: OrderStatus.values[j['status']],
-      );
-}
-
-const _months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-String fmtDate(DateTime d) => '${d.day} ${_months[d.month - 1]}';
-
-// Da formato al precio: 149900 -> \$149.900
-String fmtPrice(int v) {
-  final s = v.toString();
-  final buf = StringBuffer('\$');
-  for (var i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
-    buf.write(s[i]);
-  }
-  return buf.toString();
-}
-
-const kShipping = 9900;
-
-// Estado global de la app: productos, carrito, pedidos y sesión
+/// Estado global de la app: catálogo, carrito, pedidos y sesión.
+/// Los datos viven en el servidor ([Backend]); aquí se guarda la copia que se muestra.
+/// El carrito es local hasta que se confirma la compra.
 class AppState extends ChangeNotifier {
-  final List<Product> products = [
-    Product(
-      id: 'p1', name: 'Chaqueta denim', category: 'Ropa', price: 149900, stock: 24,
-      colors: const [ProductColor('Azul', Color(0xFF3B5B8F)), ProductColor('Negro', Color(0xFF1A2433))],
-      description: 'Chaqueta de denim con corte clásico. Algodón de 12 oz, ajuste regular. Lavar a máquina en frío.',
-      tint: const Color(0xFFD3E2F0),
-    ),
-    Product(
-      id: 'p2', name: 'Camiseta básica', category: 'Ropa', price: 59900, stock: 63,
-      colors: const [
-        ProductColor('Blanco', Color(0xFFF2F2F2)), ProductColor('Negro', Color(0xFF1A2433)),
-        ProductColor('Azul', Color(0xFF3B5B8F)), ProductColor('Verde', Color(0xFF4F8F6B)), ProductColor('Gris', Color(0xFF9AA5B1)),
-      ],
-      description: '100 % algodón peinado, cuello redondo y tejido suave. Ideal para el día a día.',
-      tint: const Color(0xFFE3EAF4),
-    ),
-    Product(
-      id: 'p3', name: 'Jeans slim', category: 'Jeans', price: 119900, stock: 3,
-      colors: const [ProductColor('Negro', Color(0xFF1A2433)), ProductColor('Azul', Color(0xFF3B5B8F)), ProductColor('Gris', Color(0xFF9AA5B1))],
-      sizes: const ['28', '30', '32', '34'],
-      description: 'Jeans de corte slim con elastano para mayor comodidad. Tiro medio.',
-      tint: const Color(0xFFD9E7F2),
-    ),
-    Product(
-      id: 'p4', name: 'Tenis urbanos', category: 'Zapatos', price: 189900, stock: 18,
-      colors: const [ProductColor('Blanco', Color(0xFFF2F2F2)), ProductColor('Negro', Color(0xFF1A2433))],
-      sizes: const ['38', '39', '40', '41', '42'],
-      description: 'Tenis de suela ligera y plantilla acolchada para uso diario.',
-      tint: const Color(0xFFDDEBEA),
-    ),
-    Product(
-      id: 'p5', name: 'Bolso de mano', category: 'Accesorios', price: 99900, stock: 0,
-      colors: const [
-        ProductColor('Negro', Color(0xFF1A2433)), ProductColor('Café', Color(0xFF8B5E3C)),
-        ProductColor('Beige', Color(0xFFD9C7A8)), ProductColor('Azul', Color(0xFF3B5B8F)),
-      ],
-      sizes: const ['Único'],
-      description: 'Bolso de mano en cuero sintético con cierre y bolsillo interior.',
-      tint: const Color(0xFFD5EBF1),
-    ),
-  ];
+  AppState(this.backend);
 
-  // Carrito y pedidos
-  final List<CartItem> cart = [];
+  final Backend backend;
+
+  List<ProductCategory> categories = const [];
+  List<Product> products = [];
+  StoreSettings settings = const StoreSettings();
   final List<Order> orders = [];
-  int _nextOrder = 1032;
+  final List<CartItem> cart = [];
+  Profile? profile;
 
-  // Sesión
-  String? userEmail;
-  bool isAdmin = false;
-  bool get loggedIn => userEmail != null;
+  // Carga inicial
+  bool loading = false;
+  String? loadError;
 
-  // Promoción
-  bool promoActive = true;
-  int promoPercent = 30;
+  bool get loggedIn => profile != null;
+  bool get isAdmin => profile?.isAdmin ?? false;
+  String? get userEmail => profile?.email;
 
   // Pestaña activa del shell
   final ValueNotifier<int> tab = ValueNotifier(0);
   void goTab(int i) => tab.value = i;
 
-  AppState() {
-    _seed();
-  }
-
-  // Datos de ejemplo del prototipo (pedidos anteriores)
-  void _seed() {
-    final dim = [for (final p in products) p.copy()];
-    orders.addAll([
-      Order(
-        number: 1024, date: DateTime(2026, 9, 18), items: [CartItem(dim[1], dim[1].colors[0], 'M', 1)], subtotal: 59900, shipping: 0,
-        address: 'Calle 45 # 12-30, Bogotá', status: OrderStatus.shipped, customer: 'Cliente de ejemplo', paid: true,
-      ),
-      Order(
-        number: 1009, date: DateTime(2026, 9, 2), items: [CartItem(dim[0], dim[0].colors[0], 'M', 1), CartItem(dim[2], dim[2].colors[0], '32', 1)],
-        subtotal: 259800, shipping: 0, address: 'Calle 45 # 12-30, Bogotá', status: OrderStatus.delivered, customer: 'Cliente de ejemplo', paid: true,
-      ),
-    ]);
-  }
-
-  // --- Guardado local ---
-  // Se guarda todo en el dispositivo (SharedPreferences) cada vez que algo cambia
-  static const _key = 'wearup_data';
-
-  Future<void> load() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_key);
-      if (raw == null) return;
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      final loadedProducts = [for (final p in j['products']) Product.fromJson(p)];
-      final loadedOrders = [for (final o in j['orders']) Order.fromJson(o)];
-      products
-        ..clear()
-        ..addAll(loadedProducts);
-      orders
-        ..clear()
-        ..addAll(loadedOrders);
-      _nextOrder = j['nextOrder'];
-      promoActive = j['promoActive'];
-      promoPercent = j['promoPercent'];
-      userEmail = j['userEmail'];
-      isAdmin = userEmail?.toLowerCase().startsWith('admin') ?? false;
-    } catch (_) {
-      // Si los datos guardados están dañados se usan los de ejemplo
+  String categoryName(int id) {
+    for (final c in categories) {
+      if (c.id == id) return c.name;
     }
+    return '';
   }
 
-  Future<void> _save() async {
+  Product? productById(String id) {
+    for (final p in products) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  String imageUrl(String path) => backend.productImageUrl(path);
+
+  // ---------------------------------------------------------------- Carga
+
+  Future<void> init() async {
+    loading = true;
+    loadError = null;
+    notifyListeners();
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _key,
-        jsonEncode({
-          'products': [for (final p in products) p.toJson()],
-          'orders': [for (final o in orders) o.toJson()],
-          'nextOrder': _nextOrder,
-          'promoActive': promoActive,
-          'promoPercent': promoPercent,
-          'userEmail': userEmail,
-        }),
-      );
-    } catch (_) {}
+      await _loadCatalog();
+      profile = await backend.currentProfile();
+      if (profile != null) await _loadOrders();
+    } on BackendException catch (e) {
+      loadError = e.message;
+    }
+    loading = false;
+    notifyListeners();
   }
 
-  @override
-  void notifyListeners() {
-    super.notifyListeners();
-    _save();
+  // Recarga catálogo y pedidos (por ejemplo, al deslizar hacia abajo)
+  Future<void> refresh() async {
+    await _loadCatalog();
+    if (loggedIn) await _loadOrders();
+    notifyListeners();
   }
 
-  // Pedidos que ve el cliente actual
-  List<Order> get myOrders => orders.where((o) => o.email == null || o.email == userEmail).toList();
+  Future<void> _loadCatalog() async {
+    final c = await backend.loadCatalog();
+    categories = c.categories;
+    products = c.products;
+    settings = c.settings;
+    _relinkCart();
+  }
 
-  // --- Carrito ---
+  Future<void> _loadOrders() async {
+    final list = await backend.loadOrders();
+    orders
+      ..clear()
+      ..addAll(list);
+  }
+
+  // Tras recargar el catálogo, el carrito apunta a los productos nuevos;
+  // lo que ya no existe se quita.
+  void _relinkCart() {
+    final updated = <CartItem>[];
+    for (final i in cart) {
+      final p = productById(i.product.id);
+      if (p == null) continue;
+      final v = p.variants.where((v) => v.id == i.variant.id);
+      if (v.isEmpty) continue;
+      updated.add(CartItem(p, v.first, i.qty));
+    }
+    cart
+      ..clear()
+      ..addAll(updated);
+  }
+
+  // ---------------------------------------------------------------- Carrito
+
   int get cartCount => cart.fold(0, (s, i) => s + i.qty);
   int get subtotal => cart.fold(0, (s, i) => s + i.total);
-  int get shipping => cart.isEmpty ? 0 : kShipping;
+  int get shipping => cart.isEmpty ? 0 : settings.shippingCost;
   int get total => subtotal + shipping;
 
-  // Unidades de un producto en el carrito, sumando todos sus colores y tallas
-  // (el stock es por producto, no por variante)
-  int inCart(Product p) => cart.where((i) => i.product == p).fold(0, (s, i) => s + i.qty);
+  int inCart(Variant v) => cart.where((i) => i.variant.id == v.id).fold(0, (s, i) => s + i.qty);
 
-  // Unidades que todavía se pueden agregar de un producto
-  int remaining(Product p) {
-    final r = p.stock - inCart(p);
+  // Unidades de una variante que todavía se pueden agregar
+  int remaining(Variant v) {
+    final r = v.stock - inCart(v);
     return r < 0 ? 0 : r;
   }
 
-  // true si ningún producto del carrito supera su stock actual
-  bool get cartFitsStock => cart.every((i) => inCart(i.product) <= i.product.stock);
+  // true si ninguna variante del carrito supera su stock actual
+  bool get cartFitsStock => cart.every((i) => i.qty <= i.variant.stock);
 
-  // Agrega al carrito sin pasar del stock; si la variante ya existe, suma la cantidad.
-  // Devuelve cuántas unidades se agregaron (0 si no quedaba stock)
-  int addToCart(Product p, ProductColor c, String size, int qty) {
-    final add = qty.clamp(0, remaining(p));
+  // Agrega sin pasar del stock de la variante. Devuelve cuántas unidades se agregaron.
+  int addToCart(Product p, Variant v, int qty) {
+    final add = qty.clamp(0, remaining(v));
     if (add == 0) return 0;
-    final existing = cart.where((i) => i.product == p && i.color == c && i.size == size);
+    final existing = cart.where((i) => i.variant.id == v.id);
     if (existing.isNotEmpty) {
       existing.first.qty += add;
     } else {
-      cart.add(CartItem(p, c, size, add));
+      cart.add(CartItem(p, v, add));
     }
     notifyListeners();
     return add;
   }
 
-  // Cambia la cantidad de un ítem respetando el stock que dejan libre los demás ítems del mismo producto
   void setQty(CartItem i, int qty) {
-    final max = i.product.stock - (inCart(i.product) - i.qty);
+    final max = i.variant.stock;
     i.qty = qty.clamp(1, max < 1 ? 1 : max);
     notifyListeners();
   }
@@ -353,94 +147,210 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Crea el pedido, descuenta el stock y vacía el carrito.
-  // Devuelve null (sin cambiar nada) si el carrito pide más unidades de las que hay
-  Order? placeOrder({required String address, required String customer, required String phone, required String receipt}) {
-    if (cart.isEmpty || !cartFitsStock) return null;
-    final order = Order(
-      number: _nextOrder++,
+  // ---------------------------------------------------------------- Sesión
+
+  Future<void> signIn(String email, String password) async {
+    profile = await backend.signIn(email, password);
+    await _loadOrders();
+    notifyListeners();
+  }
+
+  Future<void> signUp({
+    required String email,
+    required String password,
+    required String fullName,
+    required String phone,
+    required bool dataConsent,
+  }) async {
+    profile = await backend.signUp(email: email, password: password, fullName: fullName, phone: phone, dataConsent: dataConsent);
+    await _loadOrders();
+    notifyListeners();
+  }
+
+  Future<void> signOut() async {
+    await backend.signOut();
+    _clearSession();
+  }
+
+  Future<void> sendPasswordReset(String email) => backend.sendPasswordReset(email);
+
+  Future<void> confirmPasswordReset({required String email, required String code, required String newPassword}) =>
+      backend.confirmPasswordReset(email: email, code: code, newPassword: newPassword);
+
+  Future<void> updateProfile({required String fullName, required String phone}) async {
+    profile = await backend.updateProfile(fullName: fullName, phone: phone);
+    notifyListeners();
+  }
+
+  Future<void> deleteMyAccount() async {
+    await backend.deleteMyAccount();
+    cart.clear();
+    _clearSession();
+  }
+
+  void _clearSession() {
+    profile = null;
+    orders.clear();
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------- Pedidos
+
+  // Pedidos del usuario actual (el administrador recibe todos, pero aquí solo ve los suyos)
+  List<Order> get myOrders => orders.where((o) => o.userId != null && o.userId == profile?.id).toList();
+
+  /// Sube el comprobante y crea el pedido en el servidor, que valida el stock
+  /// y calcula los precios. Si algo falla, el carrito se conserva.
+  Future<Order> placeOrder({required ShippingInfo shippingInfo, required PickedImage receipt}) async {
+    if (!loggedIn) throw BackendException(serverErrors['NO_AUTENTICADO']!);
+    if (cart.isEmpty) throw BackendException(serverErrors['CARRITO_VACIO']!);
+    if (!cartFitsStock) throw BackendException(serverErrors['STOCK_INSUFICIENTE']!);
+
+    final receiptPath = await backend.uploadReceipt(receipt);
+    final int number;
+    try {
+      number = await backend.placeOrder(items: List.of(cart), shipping: shippingInfo, receiptPath: receiptPath);
+    } on BackendException {
+      // El stock pudo cambiar: se recarga para mostrar las unidades reales
+      try {
+        await _loadCatalog();
+        notifyListeners();
+      } on BackendException {
+        // sin conexión: se mantiene lo que había
+      }
+      rethrow;
+    }
+
+    // Copia local por si no se puede recargar enseguida
+    final local = Order(
+      number: number,
+      userId: profile!.id,
       date: DateTime.now(),
-      items: [for (final i in cart) i.snapshot()],
+      items: [
+        for (final i in cart)
+          OrderItem(
+            productName: i.product.name,
+            colorName: i.variant.colorName,
+            colorHex: i.variant.colorHex,
+            size: i.variant.size,
+            tint: i.product.tint,
+            unitPrice: i.product.price,
+            qty: i.qty,
+          ),
+      ],
       subtotal: subtotal,
       shipping: shipping,
-      address: address,
       status: OrderStatus.confirmed,
-      customer: customer,
-      phone: phone,
-      email: userEmail,
-      receipt: receipt,
+      customerName: shippingInfo.customerName,
+      customerEmail: profile!.email,
+      phone: shippingInfo.phone,
+      address: shippingInfo.address,
+      city: shippingInfo.city,
+      department: shippingInfo.department,
+      notes: shippingInfo.notes,
+      receiptPath: receiptPath,
     );
-    for (final i in cart) {
-      i.product.stock -= i.qty;
-    }
-    orders.insert(0, order);
     cart.clear();
+    try {
+      await _loadCatalog();
+      await _loadOrders();
+    } on BackendException {
+      orders.insert(0, local);
+    }
     notifyListeners();
-    return order;
+    return orders.firstWhere((o) => o.number == number, orElse: () => local);
   }
 
-  // --- Sesión ---
-  // Inicio de sesión simulado: un correo que empieza por "admin" es administrador
-  void login(String email) {
-    userEmail = email;
-    isAdmin = email.toLowerCase().startsWith('admin');
-    notifyListeners();
-  }
+  Future<String> receiptUrl(String path) => backend.receiptUrl(path);
 
-  void logout() {
-    userEmail = null;
-    isAdmin = false;
-    notifyListeners();
-  }
+  // ---------------------------------------------------------------- Administración
 
-  // --- Administración ---
-  void saveProduct(Product p) {
-    if (!products.contains(p)) products.add(p);
+  Future<void> saveProduct(ProductDraft draft) async {
+    await backend.saveProduct(draft);
+    await _loadCatalog();
     notifyListeners();
   }
 
-  void deleteProduct(Product p) {
-    products.remove(p);
-    cart.removeWhere((i) => i.product == p);
+  Future<void> deleteProduct(Product p) async {
+    await backend.deleteProduct(p.id);
+    cart.removeWhere((i) => i.product.id == p.id);
+    await _loadCatalog();
     notifyListeners();
   }
 
-  void setStock(Product p, int stock) {
-    p.stock = stock < 0 ? 0 : stock;
+  // Cambia el stock enseguida en pantalla y lo guarda; si falla, lo revierte
+  Future<void> setVariantStock(Variant v, int stock) async {
+    final old = v.stock;
+    v.stock = stock < 0 ? 0 : stock;
+    notifyListeners();
+    try {
+      await backend.setVariantStock(v.id, v.stock);
+    } on BackendException {
+      v.stock = old;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> addProductImage(Product p, PickedImage image) async {
+    await backend.addProductImage(p.id, image);
+    await _loadCatalog();
     notifyListeners();
   }
 
-  void setOrderStatus(Order o, OrderStatus s) {
+  Future<void> deleteProductImage(Product p, String path) async {
+    await backend.deleteProductImage(p.id, path);
+    await _loadCatalog();
+    notifyListeners();
+  }
+
+  Future<void> setOrderStatus(Order o, OrderStatus s) async {
+    final old = o.status;
     o.status = s;
     notifyListeners();
+    try {
+      await backend.updateOrder(o.number, status: s);
+    } on BackendException {
+      o.status = old;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   // El administrador confirma que recibió la transferencia
-  void validatePayment(Order o) {
+  Future<void> validatePayment(Order o) async {
     o.paid = true;
     notifyListeners();
-  }
-
-  // Elimina un pedido y devuelve las unidades al inventario si aún no se entregó
-  void deleteOrder(Order o) {
-    if (o.status != OrderStatus.delivered) {
-      for (final i in o.items) {
-        final live = products.where((p) => p.id == i.product.id);
-        if (live.isNotEmpty) live.first.stock += i.qty;
-      }
+    try {
+      await backend.updateOrder(o.number, paid: true);
+    } on BackendException {
+      o.paid = false;
+      notifyListeners();
+      rethrow;
     }
+  }
+
+  // Elimina un pedido; si no se había entregado, el servidor devuelve las unidades
+  Future<void> deleteOrder(Order o) async {
+    await backend.deleteOrder(o.number);
     orders.remove(o);
+    await _loadCatalog();
     notifyListeners();
   }
 
-  void setPromo(bool active, int percent) {
-    promoActive = active;
-    promoPercent = percent;
+  Future<void> setPromo(bool active, int percent) async {
+    final old = settings;
+    settings = settings.copyWith(promoActive: active, promoPercent: percent);
     notifyListeners();
+    try {
+      await backend.saveSettings(settings);
+    } on BackendException {
+      settings = old;
+      notifyListeners();
+      rethrow;
+    }
   }
-
-  String newProductId() => 'p${DateTime.now().microsecondsSinceEpoch}';
 }
 
-// Instancia única que usan todas las pantallas
-final app = AppState();
+// Instancia única que usan todas las pantallas (se crea en main o en las pruebas)
+late AppState app;

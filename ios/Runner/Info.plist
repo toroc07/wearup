@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WearUp necesita acceso a tus fotos para adjuntar el comprobante de pago y las fotos de los productos.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WearUp usa la cámara para tomar la foto del comprobante de pago o de los productos.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

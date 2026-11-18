@@ -5,15 +5,15 @@
 </p>
 
 <p align="center">
-  <strong>Viste tu estilo</strong> — Aplicación móvil y de escritorio multiplataforma desarrollada en Flutter para la comercialización de moda, calzado y accesorios, con flujo guiado de compra, pagos mediante transferencia bancaria (BRE-B), seguimiento de pedidos y panel administrativo integrado.
+  <strong>Viste tu estilo</strong> — Aplicación multiplataforma (web, Android, iOS y Windows) desarrollada en Flutter para la venta de moda, calzado y accesorios, con compra guiada, pago por transferencia BRE-B con comprobante, seguimiento de pedidos y panel administrativo. El backend es <a href="https://supabase.com">Supabase</a> (PostgreSQL, autenticación y almacenamiento).
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter&logoColor=white" alt="Flutter" />
   <img src="https://img.shields.io/badge/Dart-3.13%2B-0175C2?logo=dart&logoColor=white" alt="Dart" />
-  <img src="https://img.shields.io/badge/Plataformas-Android%20%7C%20iOS%20%7C%20Web%20%7C%20Windows-blue" alt="Plataformas" />
+  <img src="https://img.shields.io/badge/Backend-Supabase-3ECF8E?logo=supabase&logoColor=white" alt="Supabase" />
+  <img src="https://img.shields.io/badge/Plataformas-Web%20%7C%20Android%20%7C%20iOS%20%7C%20Windows-blue" alt="Plataformas" />
   <a href="https://github.com/toroc07/wearup"><img src="https://img.shields.io/badge/GitHub-toroc07%2Fwearup-181717?logo=github&logoColor=white" alt="GitHub Repo" /></a>
-  <img src="https://img.shields.io/badge/Versi%C3%B3n-1.0.0%2B1-success" alt="Versión" />
 </p>
 
 ---
@@ -21,247 +21,196 @@
 ## Tabla de Contenidos
 
 1. [Descripción General](#descripción-general)
-2. [Identidad Visual y Diseño](#identidad-visual-y-diseño)
+2. [Arquitectura](#arquitectura)
 3. [Características Principales](#características-principales)
-   - [Módulo de Clientes (Tienda)](#1-módulo-de-clientes-tienda)
-   - [Flujo de Compra en 5 Pasos (Checkout)](#2-flujo-de-compra-en-5-pasos-checkout)
-   - [Cuenta y Seguimiento de Pedidos](#3-cuenta-y-seguimiento-de-pedidos)
-   - [Panel de Administración (Backoffice)](#4-panel-de-administración-backoffice)
-4. [Estructura del Proyecto y Enlaces de Código](#estructura-del-proyecto-y-enlaces-de-código)
-5. [Modelo de Datos y Gestión del Estado](#modelo-de-datos-y-gestión-del-estado)
+4. [Estructura del Proyecto](#estructura-del-proyecto)
+5. [Modelo de Datos y Seguridad](#modelo-de-datos-y-seguridad)
 6. [Roles y Acceso al Sistema](#roles-y-acceso-al-sistema)
-7. [Requisitos Previos e Instalación](#requisitos-previos-e-instalación)
+7. [Instalación y Ejecución](#instalación-y-ejecución)
 8. [Ejecución de Pruebas](#ejecución-de-pruebas)
-9. [Persistencia y Datos](#persistencia-y-datos)
-10. [Repositorio y Autor](#repositorio-y-autor)
+9. [Identidad Visual](#identidad-visual)
+10. [Repositorio](#repositorio)
 
 ---
 
 ## Descripción General
 
-**WearUp** es una solución de comercio electrónico diseñada para brindar una experiencia de usuario fluida, moderna y atractiva en el sector textil y de accesorios. Integra una interfaz intuitiva para compradores junto con un módulo de gestión comercial completo para administradores de tienda.
-
-La aplicación opera de manera reactiva mediante arquitectura desacoplada impulsada por [`AppState`](lib/state.dart), manteniendo persistencia local sincronizada para catálogos, pedidos, sesiones y promociones.
+**WearUp** es la tienda en línea de una única empresa de moda. Los clientes consultan el catálogo (ropa, jeans, zapatos y accesorios), eligen talla y color, compran pagando por transferencia a una llave BRE-B y siguen el estado de sus pedidos. La empresa administra productos, inventario por talla y color, promociones y pedidos desde un panel administrativo.
 
 ---
 
-## Identidad Visual y Diseño
+## Arquitectura
 
-El sistema visual de WearUp está construido sobre Material 3 con especificaciones tipográficas y paletas cromáticas personalizadas en [lib/theme.dart](lib/theme.dart):
+```mermaid
+graph LR
+    App["App Flutter<br/>(web · Android · iOS · Windows)"]
+    Auth["Supabase Auth<br/>(cuentas y sesiones)"]
+    DB[("PostgreSQL<br/>tablas + RLS + funciones")]
+    Storage["Supabase Storage<br/>fotos (público) · comprobantes (privado)"]
 
-* **Tipografía:** Familia [Montserrat](assets/fonts/Montserrat.ttf) registrada en [pubspec.yaml](pubspec.yaml).
-* **Paleta de Colores:**
-  * Primario / Énfasis: `#1F6BB5` (`kBlue`)
-  * Tono Oscuro / Textos y Cabeceras: `#12203A` (`kNavy`)
-  * Fondo General: `#F5F8FC` (`kBg`)
-  * Bordes y Divisores: `#D5DEEA` (`kBorder`)
-  * Textos Secundarios: `#5B6B80` (`kMuted`)
-  * Éxito / Entregado / Validación: `#0F7B3F` (`kGreen`)
-  * Alerta / Stock Bajo / Pendiente: `#B45309` (`kAmber`)
-  * Peligro / Cancelaciones / Eliminar: `#C62828` (`kRed`)
-  * Acento Secundario / Pasos Completados: `#4FB0CC` (`kTeal`)
-* **Diseño Adaptativo (Responsive):** Experiencia optimizada tanto para dispositivos móviles como para pantallas anchas de escritorio (≥ 800 px) con menú lateral persistente en el panel administrativo.
+    App -- "HTTPS + clave publicable" --> Auth
+    App -- "consultas y place_order()" --> DB
+    App -- "subida de imágenes" --> Storage
+```
+
+* **Un solo código para todas las plataformas.** El cliente y el panel administrativo están en la misma app; el panel solo aparece para cuentas con rol de administrador.
+* **La app no es de confianza.** Quién puede leer o modificar cada fila lo decide la base de datos con *Row Level Security* (RLS). Los pedidos solo se crean con la función `place_order()`, que valida el stock y calcula los precios en el servidor.
+* **Estado en la app:** [`AppState`](lib/state.dart) (un `ChangeNotifier`) guarda la copia que se muestra del catálogo, el carrito, los pedidos y la sesión. Habla con el servidor a través de la interfaz [`Backend`](lib/backend.dart), cuya implementación real es [`SupabaseBackend`](lib/supabase_backend.dart). Las pruebas usan una implementación en memoria con las mismas reglas.
 
 ---
 
 ## Características Principales
 
-### 1. Módulo de Clientes (Tienda)
-* **Pantalla de Inicio ([`HomeScreen`](lib/shop.dart)):**
-  * Buscador rápido con redirección interactiva al catálogo.
-  * Banner de portada de temporada ("Nueva Colección").
-  * Carrusel de acceso directo a categorías (`Ropa`, `Jeans`, `Zapatos`, `Accesorios`).
-  * Sección horizontal de productos destacados con acceso directo al detalle.
-  * Banner promocional dinámico con descuento configurable por el administrador.
-* **Catálogo y Filtrado Multinivel ([`CatalogScreen`](lib/shop.dart)):**
-  * Búsqueda en vivo por texto en nombres y categorías.
-  * Filtros por categoría mediante chips interactivos.
-  * Menús desplegables para filtrar por **Talla**, **Color** y **Rango de Precio**.
-  * Conteo dinámico de productos coincidentes y botón para limpiar filtros.
-* **Detalle de Producto ([`ProductDetailScreen`](lib/shop.dart)):**
-  * Galería de miniaturas y visualizador de imágenes.
-  * Selector de variantes de color con previsualización visual de muestras.
-  * Selector de tallas con modal de guía de medidas ("¿Cuál es mi talla?").
-  * Selector de cantidad ([`QtyStepper`](lib/widgets.dart)) acotado al stock disponible.
-  * Indicadores de disponibilidad inmediata ([`StockLabel`](lib/widgets.dart)): Disponible, Últimas unidades o Agotado.
+### 1. Tienda
+* **Inicio ([`HomeScreen`](lib/shop.dart)):** buscador, portada, accesos por categoría, productos destacados, banner de promoción configurable y enlace a la política de privacidad.
+* **Catálogo ([`CatalogScreen`](lib/shop.dart)):** búsqueda por texto y filtros por **categoría**, **talla**, **color**, **precio** y **disponibilidad**. Se actualiza deslizando hacia abajo.
+* **Selección de talla y color:** el botón *Agregar al carrito* abre un selector rápido; el detalle del producto ([`ProductDetailScreen`](lib/shop.dart)) muestra fotos, colores y tallas. Solo se pueden elegir combinaciones con stock; las agotadas aparecen tachadas.
+* **Disponibilidad:** *Disponible*, *Últimas unidades* (5 o menos) o *Agotado*, y "Quedan N unidades" para la talla y color elegidos.
 
-### 2. Flujo de Compra en 5 Pasos (Checkout)
-Implementado en [`CheckoutScreen`](lib/checkout.dart), cuenta con un indicador de progreso ([`_Stepper`](lib/checkout.dart)):
-1. **Carrito:** Edición de unidades (limitadas al stock disponible), cálculo de subtotal y costo de envío fijo (`$9.900`), eliminación de ítems y validación de autenticación obligatoria para proceder. Si el stock baja mientras el producto está en el carrito, se avisa y no se deja continuar hasta ajustarlo.
-2. **Envío:** Captura y validación de datos de entrega (Nombre, celular, dirección, ciudad, departamento y notas opcionales).
-3. **Pago:** Datos de transferencia directa interbancaria mediante Llave BRE-B con botón de copiado al portapapeles.
-4. **Comprobante:** Paso para adjuntar la foto/captura de la transferencia. *En el prototipo la selección es simulada: se registra un nombre de archivo, no se sube ninguna imagen.*
-5. **Confirmación:** Pantalla de pedido confirmado con número de orden único, desglose final y accesos a seguimiento o nuevo pedido.
+### 2. Compra en 5 pasos ([`CheckoutScreen`](lib/checkout.dart))
+1. **Carrito:** cantidades limitadas al stock de cada talla y color; si el stock baja mientras el producto está en el carrito, se avisa y no se deja continuar.
+2. **Envío:** nombre, teléfono (precargados desde el perfil), dirección, ciudad, departamento e indicaciones.
+3. **Pago:** llave BRE-B de la tienda (configurada en la base de datos) con botón para copiarla.
+4. **Comprobante:** foto o captura de la transferencia desde la galería o la cámara (JPG o PNG, máx. 10 MB). Se guarda en un espacio privado.
+5. **Confirmación:** número de pedido y estado. El administrador valida el pago después.
 
-### 3. Cuenta y Seguimiento de Pedidos
-* **Autenticación e Ingreso ([`AuthForm`](lib/account.dart)):**
-  * Pestañas unificadas de inicio de sesión y registro de usuario nuevo.
-  * Modo de navegación como invitado para exploración del catálogo.
-* **Historial de Pedidos ([`OrdersTab`](lib/account.dart)):**
-  * Listado de pedidos filtrable por estado: *Todos*, *En curso* y *Entregados*.
-* **Línea de Tiempo de Entrega ([`TrackingScreen`](lib/account.dart)):**
-  * Progreso visual cronológico en 4 etapas: `Confirmado` ➔ `En preparación` ➔ `Enviado` ➔ `Entregado`.
-  * Indica si el pago ya fue validado por el administrador o sigue en validación.
-  * Consulta detallada de dirección de destino y resumen de productos adquiridos.
+### 3. Cuenta y seguimiento ([`account.dart`](lib/account.dart))
+* **Registro** con nombre, teléfono, correo, contraseña y **autorización de tratamiento de datos** (Ley 1581 de 2012).
+* **Inicio y cierre de sesión** reales; **recuperación de contraseña** con un código enviado al correo.
+* **Mis datos:** editar nombre y teléfono, y **eliminar la cuenta**.
+* **Mis pedidos:** filtro por *Todos*, *En curso* y *Entregados*.
+* **Seguimiento:** línea de tiempo `Confirmado` ➔ `En preparación` ➔ `Enviado` ➔ `Entregado`, estado del pago (validado o en validación), dirección, productos y acceso al comprobante.
+* **Política de privacidad** ([`legal.dart`](lib/legal.dart)).
 
-### 4. Panel de Administración (Backoffice)
-Ubicado en [`AdminScreen`](lib/admin.dart):
-* **Panel (Dashboard):** Métricas clave en tiempo real (productos activos, productos con pocas unidades, agotados y pedidos pendientes).
-* **Gestión de Productos:** Tabla con scroll horizontal, filtros por categoría y stock, modal de creación/edición ([`_ProductDialog`](lib/admin.dart)) y borrado con confirmación.
-* **Control de Inventario:** Modificación rápida de existencias (+ / -) con actualización instantánea de estado.
-* **Configuración de Promociones:** Activación/desactivación del banner en tiempo real y ajuste del porcentaje anunciado mediante slider (5% al 70%). *El porcentaje solo se muestra en el banner del inicio; no modifica los precios.*
-* **Control de Pedidos:**
-  * Filtro por etapas (`OrderStatus`).
-  * Desglose completo de cliente, teléfono, comprobante adjunto e ítems.
-  * Validación de pagos con un clic.
-  * Transición de estados de envío.
-  * Eliminación de pedidos con confirmación; si el pedido no se había entregado, sus unidades vuelven al inventario.
+### 4. Panel de administración ([`AdminScreen`](lib/admin.dart))
+* **Panel:** productos activos, últimas unidades, agotados, pedidos por atender y pagos por validar.
+* **Productos:** crear, editar y eliminar; definir colores y tallas (cada combinación es una variante con su SKU) y subir o quitar fotos.
+* **Inventario:** stock de cada talla y color con botones + / − o escribiendo la cantidad.
+* **Promociones:** mostrar u ocultar el banner del inicio y fijar el porcentaje anunciado (5 % a 70 %). *El porcentaje solo se muestra en el banner; no cambia los precios.*
+* **Pedidos:** filtro por estado, datos del cliente, **ver el comprobante**, **validar el pago**, avanzar o fijar el estado y eliminar (si el pedido no se había entregado, las unidades vuelven al inventario).
 
 ---
 
-## Estructura del Proyecto y Enlaces de Código
+## Estructura del Proyecto
 
 ```
 wearup/
-├── assets/
-│   ├── fonts/
-│   │   └── Montserrat.ttf      # Tipografía corporativa
-│   └── logo.png                # Isotipo y logotipo de la marca
+├── assets/                     # Logo y tipografía Montserrat
+├── database/                   # Scripts SQL de Supabase e instrucciones
+│   ├── 01_esquema.sql          # Tablas, relaciones, índices y disparadores
+│   ├── 02_seguridad.sql        # RLS, funciones del servidor y almacenamiento
+│   ├── 03_datos_prueba.sql     # Catálogo, variantes y pedidos de ejemplo
+│   └── README.md               # Paso a paso para crear el proyecto Supabase
 ├── lib/
-│   ├── account.dart            # Módulos de autenticación, perfil, historial y seguimiento
-│   ├── admin.dart              # Panel de administración, métricas, CRUD e inventario
-│   ├── checkout.dart           # Stepper y proceso de compra en 5 fases con llave BRE-B
-│   ├── main.dart               # Punto de entrada de la aplicación y navegación por pestañas
-│   ├── shop.dart               # Pantalla de inicio, catálogo filtrable y vista de detalle
-│   ├── state.dart              # Gestión del estado global, modelos de datos y persistencia
-│   ├── theme.dart              # Configuración de colores, fuentes y estilos de Material 3
-│   └── widgets.dart            # Componentes reutilizables (tarjetas, botones, etiquetas)
+│   ├── main.dart               # Arranque: conexión con Supabase y navegación por pestañas
+│   ├── config.dart             # URL y clave publicable del proyecto Supabase
+│   ├── models.dart             # Producto, variante, pedido, perfil, configuración
+│   ├── backend.dart            # Interfaz de operaciones con el servidor y mensajes de error
+│   ├── supabase_backend.dart   # Implementación con Supabase
+│   ├── state.dart              # AppState: catálogo, carrito, pedidos y sesión
+│   ├── shop.dart               # Inicio, catálogo, selector de talla/color y detalle
+│   ├── checkout.dart           # Compra en 5 pasos
+│   ├── account.dart            # Ingreso, registro, mis datos, pedidos y seguimiento
+│   ├── admin.dart              # Panel de administración
+│   ├── legal.dart              # Política de privacidad
+│   ├── widgets.dart            # Componentes compartidos
+│   └── theme.dart              # Colores y tema de Material 3
 ├── test/
-│   ├── state_test.dart         # Pruebas de la lógica de stock y aislamiento de pedidos
-│   └── widget_test.dart        # Pruebas integrales de flujo de compra y backoffice
-├── pubspec.yaml                # Especificación de paquetes, versiones y recursos
-└── README.md                   # Documentación técnica del proyecto
+│   ├── fake_backend.dart       # Backend en memoria con las reglas del servidor
+│   ├── state_test.dart         # Pruebas de la lógica (stock, pedidos, sesión, administración)
+│   ├── widget_test.dart        # Pruebas de pantallas (compra, registro, filtros, panel)
+│   └── live/                   # Prueba opcional contra el Supabase real
+└── pubspec.yaml
 ```
-
-### Componentes Clave
-
-| Archivo | Responsabilidad Principal |
-| :--- | :--- |
-| [lib/main.dart](lib/main.dart) | Inicialización asíncrona de datos, configuración de tema y contenedor principal [`MainShell`](lib/main.dart) con navegación inferior indexada. |
-| [lib/theme.dart](lib/theme.dart) | Definición centralizada de colores corporativos y tema visual [`buildTheme()`](lib/theme.dart). |
-| [lib/state.dart](lib/state.dart) | Estado reactivo [`AppState`](lib/state.dart), modelos [`Product`](lib/state.dart), [`Order`](lib/state.dart), [`CartItem`](lib/state.dart), serialización JSON y sincronización con disco. |
-| [lib/widgets.dart](lib/widgets.dart) | UI compartida: [`Logo`](lib/widgets.dart), [`CartButton`](lib/widgets.dart), [`StockLabel`](lib/widgets.dart), [`StatusChip`](lib/widgets.dart), [`Card2`](lib/widgets.dart) y [`SummaryRows`](lib/widgets.dart). |
-| [lib/shop.dart](lib/shop.dart) | Pantallas de vitrina: [`HomeScreen`](lib/shop.dart), [`CatalogScreen`](lib/shop.dart) y [`ProductDetailScreen`](lib/shop.dart). |
-| [lib/checkout.dart](lib/checkout.dart) | Control del embudo transaccional ([`CheckoutScreen`](lib/checkout.dart)), cálculo de flete y confirmación de pago. |
-| [lib/account.dart](lib/account.dart) | Autenticación ([`AuthForm`](lib/account.dart)), panel de cuenta ([`AccountTab`](lib/account.dart)), pedidos personales ([`OrdersTab`](lib/account.dart)) y seguimiento ([`TrackingScreen`](lib/account.dart)). |
-| [lib/admin.dart](lib/admin.dart) | Interfaz administrativa con panel de control, inventario, promociones y atención de pedidos. |
-| [test/state_test.dart](test/state_test.dart) | Pruebas unitarias de `AppState`: límite de stock en el carrito y pedidos que no cambian al editar el catálogo. |
-| [test/widget_test.dart](test/widget_test.dart) | Batería de pruebas de integración con simulación de fuentes y mocking de `SharedPreferences`. |
 
 ---
 
-## Modelo de Datos y Gestión del Estado
+## Modelo de Datos y Seguridad
 
-La gestión de estado se centraliza a través del patrón **ChangeNotifier / Listenable** con una instancia única accesible globalmente (`app`):
+El detalle de tablas y permisos está en [database/README.md](database/README.md). En resumen:
 
-```mermaid
-graph TD
-    AppState["AppState (singleton)"]
-    Products["List<Product>"]
-    Cart["List<CartItem>"]
-    Orders["List<Order>"]
-    Storage[("SharedPreferences ('wearup_data')")]
-
-    AppState --> Products
-    AppState --> Cart
-    AppState --> Orders
-    AppState -.->|Auto-guardado en notifyListeners()| Storage
-```
-
-* **Stock Automático:** El estado de disponibilidad se computa dinámicamente según el inventario numérico:
-  * `stock > 5` ➔ [`Stock.available`](lib/state.dart)
-  * `1 <= stock <= 5` ➔ [`Stock.low`](lib/state.dart)
-  * `stock <= 0` ➔ [`Stock.out`](lib/state.dart)
-* **Stock por Producto:** El inventario se lleva por producto, no por color o talla. El carrito no permite sumar, entre todas las variantes de un producto, más unidades de las disponibles, y un pedido no se confirma si el stock bajó después de agregarlo al carrito.
-* **Aislamiento en Pedidos:** Al confirmar la compra, cada ítem del pedido guarda una copia del producto (nombre, precio, color, etc.). Si el producto se edita o elimina más adelante, el pedido conserva los datos y el total con los que se compró.
+* **Stock por variante:** cada combinación talla + color es una fila de `product_variants` con su SKU y sus unidades.
+* **Pedidos inmutables:** cada ítem del pedido guarda una copia del nombre, el precio, el color y la talla; editar o borrar el producto después no cambia el pedido.
+* **Pedidos seguros:** `place_order()` bloquea las variantes, verifica el stock, toma los precios de la base, guarda el pedido y descuenta el inventario en una sola transacción.
+* **Permisos (RLS):** el invitado solo ve el catálogo; el cliente ve y modifica solo lo suyo y no puede cambiar su rol; el administrador gestiona todo.
+* **Comprobantes privados:** cada cliente sube a su propia carpeta del bucket `receipts`; solo él y el administrador pueden verlos, mediante enlaces temporales.
+* **Datos personales:** la contraseña la guarda cifrada Supabase Auth; las comunicaciones van por HTTPS; el registro guarda la fecha de la autorización de datos; el usuario puede eliminar su cuenta.
 
 ---
 
 ## Roles y Acceso al Sistema
 
-La autenticación simula roles en tiempo de ejecución sin dependencias externas:
-
-* **Cliente Convencional:**
-  * Inicie sesión con cualquier correo electrónico estándar (ejemplo: `cliente@correo.com`).
-  * Acceso completo a explorar el catálogo, agregar al carrito, completar compras, consultar su historial y rastrear sus órdenes.
-* **Administrador de Tienda:**
-  * Inicie sesión con cualquier correo electrónico que inicie por el prefijo **`admin`** (ejemplo: `admin@wearup.com`, `admin@tienda.com`).
-  * Habilita el acceso directo al **Panel de Administración** desde la pestaña de Cuenta, visualización de métricas, edición del catálogo de productos, control de stock, gestión del banner promocional y validación de transferencias de pago.
+* **Cliente invitado:** explora el catálogo sin cuenta. Para comprar debe registrarse o ingresar.
+* **Cliente:** se registra desde la pestaña *Cuenta* o al pagar. Compra, sigue sus pedidos y gestiona sus datos.
+* **Administrador:** es una cuenta normal a la que se le asigna el rol desde la base de datos (ver [database/README.md](database/README.md), paso 9). Al ingresar, entra directo al panel; también lo encuentra en *Cuenta* → *Panel de administración*.
 
 ---
 
-## Requisitos Previos e Instalación
+## Instalación y Ejecución
 
-### Requisitos del Sistema
-* [Flutter SDK](https://docs.flutter.dev/get-started/install) `3.47` o superior.
-* Dart SDK `3.13.3` o superior (restricción `sdk: ^3.13.3` en `pubspec.yaml`; incluido con Flutter).
-* Dispositivo físico, emulador de Android / simulador de iOS, o navegador web compatible con soporte para CanvasKit / HTML.
+### Requisitos
+* [Flutter SDK](https://docs.flutter.dev/get-started/install) `3.47` o superior (incluye Dart `3.13.3`).
+* Navegador moderno, emulador o dispositivo Android/iOS, o Windows.
+* Para compilar la versión de **Windows**: activar el *Modo de desarrollador* de Windows (Configuración → Sistema → Para programadores).
 
-### Pasos de Instalación
-
-1. **Clonar o descargar el repositorio:**
+### Pasos
+1. **Clonar el repositorio:**
    ```bash
    git clone https://github.com/toroc07/wearup.git
    cd wearup
    ```
-
-2. **Instalar dependencias del proyecto:**
+2. **Instalar dependencias:**
    ```bash
    flutter pub get
    ```
-
-3. **Verificar el entorno de desarrollo:**
+3. **Ejecutar:**
    ```bash
-   flutter doctor
-   ```
-
-4. **Compilar y ejecutar la aplicación:**
-   ```bash
-   # En el dispositivo o emulador por defecto
-   flutter run
-
-   # O especificando una plataforma concreta:
    flutter run -d chrome      # Web
-   flutter run -d windows     # Escritorio Windows
-   flutter run -d android     # Dispositivo Android
+   flutter run -d android     # Android
+   flutter run -d windows     # Windows
    ```
+
+La app se conecta por defecto al proyecto Supabase de WearUp ([lib/config.dart](lib/config.dart)). La clave incluida es la **clave publicable**: es pública por diseño y solo permite lo que autorizan los permisos de la base de datos.
+
+### Usar un proyecto Supabase propio
+1. Crea el proyecto y ejecuta los scripts siguiendo [database/README.md](database/README.md).
+2. Ejecuta la app indicando tu URL y tu clave publicable:
+   ```bash
+   flutter run --dart-define=SUPABASE_URL=https://xxxx.supabase.co --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxx
+   ```
+
+> Nunca pongas la clave secreta (`sb_secret_…`) en la app ni en el repositorio.
 
 ---
 
 ## Ejecución de Pruebas
 
-El proyecto cuenta con pruebas de integración y widgets automatizadas que validan:
-* La navegación por el catálogo y adición de productos.
-* El flujo completo de checkout con validación de formularios y subida de comprobante.
-* El acceso administrativo, validación de pagos y avance de estados de entrega.
-* El límite de stock en el carrito y que los pedidos no cambien al editar el catálogo.
-
-Para ejecutar los tests en la consola:
-
 ```bash
 flutter test
 ```
 
+Las pruebas usan un backend en memoria que aplica las mismas reglas que la base de datos y validan:
+* Stock por talla y color en el carrito y en el servidor.
+* Compra completa: selección de talla y color, envío, comprobante, confirmación y seguimiento.
+* Que un pedido no se cree si el stock bajó, y que editar un producto no cambie los pedidos anteriores.
+* Registro con autorización de datos, inicio de sesión, recuperación de contraseña, edición y eliminación de la cuenta.
+* Filtro por disponibilidad.
+* Panel de administración: validar pagos, cambiar estados, eliminar pedidos devolviendo stock, crear y editar productos con sus variantes, y que un cliente no pueda hacer cambios de administrador.
+
+Prueba opcional contra el Supabase real (crea una cuenta de prueba y la elimina al terminar; no crea pedidos):
+```bash
+flutter test test/live --dart-define=LIVE=true
+```
+
 ---
 
-## Persistencia y Datos
+## Identidad Visual
 
-Los datos de la aplicación se guardan localmente bajo la clave `'wearup_data'` utilizando [`shared_preferences`](pubspec.yaml). Al abrir la app por primera vez, se cargan productos iniciales de muestra (chaquetas denim, camisetas, jeans slim, calzado urbano y bolsos) junto con pedidos históricos de demostración. Cualquier cambio posterior (nuevos pedidos, cambios de stock o edición de productos) se preserva automáticamente entre sesiones.
+Material 3 con la tipografía **Montserrat** y la paleta de [lib/theme.dart](lib/theme.dart): azul `#1F6BB5`, azul marino `#12203A`, fondo `#F5F8FC`, bordes `#D5DEEA`, texto secundario `#5B6B80`, verde `#0F7B3F`, ámbar `#B45309`, rojo `#C62828` y turquesa `#4FB0CC`. El diseño se adapta a móviles y a pantallas anchas (≥ 800 px), donde el panel administrativo muestra un menú lateral fijo.
 
 ---
 
-## Repositorio y Autor
+## Repositorio
 
-* **Repositorio oficial en GitHub:** [https://github.com/toroc07/wearup](https://github.com/toroc07/wearup)
-* **Desarrollador / Propietario:** [@toroc07](https://github.com/toroc07)
-* **ID de Aplicación / Namespace:** `com.wearup.wearup`
+* **GitHub:** [https://github.com/toroc07/wearup](https://github.com/toroc07/wearup)
+* **ID de aplicación:** `com.wearup.wearup`

@@ -1,16 +1,9 @@
--- =============================================================================
--- WearUp · 03_datos_prueba.sql
--- Datos de prueba: configuración, categorías, 5 productos con sus variantes
--- (talla + color + stock) y 2 pedidos de ejemplo.
--- Ejecutar después de 02_seguridad.sql. Se puede volver a ejecutar sin duplicar datos.
--- =============================================================================
+-- WearUp: datos de prueba.
 
--- Configuración de la tienda (llave BRE-B de prueba)
 insert into public.store_settings (id, promo_active, promo_percent, shipping_cost, bre_b_key, bre_b_holder)
 values (1, true, 30, 9900, '300 123 4567', 'WearUp SAS')
 on conflict (id) do nothing;
 
--- Categorías (SRS 1.2)
 insert into public.categories (id, name, position) values
   (1, 'Ropa', 1),
   (2, 'Jeans', 2),
@@ -18,7 +11,6 @@ insert into public.categories (id, name, position) values
   (4, 'Accesorios', 4)
 on conflict (id) do nothing;
 
--- Productos (ids fijos para poder referenciarlos abajo)
 insert into public.products (id, category_id, name, description, price, tint) values
   ('a0000000-0000-4000-8000-000000000001', 1, 'Chaqueta denim',
    'Chaqueta de denim con corte clásico. Algodón de 12 oz, ajuste regular. Lavar a máquina en frío.', 149900, '#D3E2F0'),
@@ -32,8 +24,7 @@ insert into public.products (id, category_id, name, description, price, tint) va
    'Bolso de mano en cuero sintético con cierre y bolsillo interior.', 99900, '#D5EBF1')
 on conflict (id) do nothing;
 
--- Variantes: cada combinación color x talla con su SKU y stock.
--- sku = WU-<producto>-<color>-<talla>
+-- Variantes: cada color x talla con su SKU y stock
 with colors (product_id, code, color_name, color_hex, color_order) as (
   values
     ('a0000000-0000-4000-8000-000000000001'::uuid, 'CHQ', 'Azul',   '#3B5B8F', 1),
@@ -72,18 +63,17 @@ select c.product_id,
              || '-' || replace(s.size, 'Único', 'U'),
        c.color_name, c.color_hex, s.size, c.color_order, s.size_order,
        case c.code
-         when 'CHQ' then 3                                                     -- 24 unidades en total
-         when 'CAM' then 3                                                     -- 60 unidades
+         when 'CHQ' then 3
+         when 'CAM' then 3
          when 'JNS' then case when c.color_name = 'Negro' and s.size in ('30', '32', '34') then 1 else 0 end
-                                                                               -- 3 unidades: "Últimas unidades"
-         when 'TEN' then 2                                                     -- 20 unidades
-         else 0                                                                -- bolso agotado
+         when 'TEN' then 2
+         else 0
        end
   from colors c
   join sizes s on s.product_id = c.product_id
 on conflict (product_id, color_name, size) do nothing;
 
--- Pedidos de ejemplo (sin cliente asociado: solo los ve el administrador)
+-- Pedidos de ejemplo sin cliente (solo los ve el administrador)
 insert into public.orders (id, user_id, customer_name, customer_email, phone, address, city, department,
                            subtotal, shipping, status, receipt_path, paid, paid_at, created_at)
 overriding system value
@@ -105,11 +95,5 @@ select o.order_id, p.id, v.id, p.name, v.color_name, v.color_hex, v.size, p.tint
   join public.product_variants v on v.product_id = o.product_id and v.color_name = o.color_name and v.size = o.size
  where not exists (select 1 from public.order_items i where i.order_id = o.order_id);
 
--- -----------------------------------------------------------------------------
--- Crear el administrador (hacerlo DESPUÉS de registrar la cuenta):
---   1. Regístrate en la app (o en Authentication > Users > Add user, marcando
---      "Auto Confirm User").
---   2. Ejecuta, cambiando el correo:
---
---   update public.profiles set role = 'admin' where email = 'admin@wearup.com';
--- -----------------------------------------------------------------------------
+-- Administrador (después de registrar la cuenta en la app):
+-- update public.profiles set role = 'admin' where email = '<correo>';

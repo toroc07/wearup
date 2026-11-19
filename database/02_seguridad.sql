@@ -1,17 +1,6 @@
--- =============================================================================
--- WearUp · 02_seguridad.sql
--- Permisos (RLS), funciones del servidor y almacenamiento de archivos.
--- Ejecutar después de 01_esquema.sql.
---
--- Principio: la app nunca es de confianza. Quién puede leer o cambiar cada fila
--- lo decide la base de datos, y los pedidos solo se crean con place_order(),
--- que valida el stock y calcula los precios en el servidor.
--- =============================================================================
+-- WearUp: permisos (RLS), funciones del servidor y almacenamiento.
 
--- -----------------------------------------------------------------------------
 -- ¿El usuario actual es administrador?
--- (security definer para poder leer profiles sin depender de sus propias políticas)
--- -----------------------------------------------------------------------------
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -25,34 +14,25 @@ as $$
   );
 $$;
 
--- -----------------------------------------------------------------------------
--- Privilegios por tabla (RLS filtra después fila por fila)
--- -----------------------------------------------------------------------------
+-- Privilegios por tabla
 revoke all on all tables in schema public from anon, authenticated;
 
--- Catálogo: lo ve cualquiera, también el cliente invitado
 grant select on public.categories, public.products, public.product_variants,
                 public.product_images, public.store_settings
   to anon, authenticated;
 
--- Escritura del catálogo y la configuración (RLS la limita al administrador)
 grant insert, update, delete on public.categories, public.products,
                                 public.product_variants, public.product_images
   to authenticated;
 grant update on public.store_settings to authenticated;
 
--- Perfil: cada uno lee el suyo y solo puede cambiar nombre y teléfono (no el rol)
 grant select on public.profiles to authenticated;
 grant update (full_name, phone) on public.profiles to authenticated;
 
--- Pedidos: se leen según RLS; solo el administrador los actualiza.
--- No hay INSERT ni DELETE directos: se usan place_order() y delete_order().
 grant select on public.orders, public.order_items to authenticated;
 grant update (status, paid) on public.orders to authenticated;
 
--- -----------------------------------------------------------------------------
 -- Row Level Security
--- -----------------------------------------------------------------------------
 alter table public.store_settings   enable row level security;
 alter table public.categories       enable row level security;
 alter table public.products         enable row level security;
@@ -62,13 +42,11 @@ alter table public.profiles         enable row level security;
 alter table public.orders           enable row level security;
 alter table public.order_items      enable row level security;
 
--- Configuración de la tienda
 create policy "Todos leen la configuración" on public.store_settings
   for select to anon, authenticated using (true);
 create policy "El administrador cambia la configuración" on public.store_settings
   for update to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 
--- Catálogo: lectura pública, escritura solo del administrador
 create policy "Todos leen las categorías" on public.categories
   for select to anon, authenticated using (true);
 create policy "El administrador gestiona las categorías" on public.categories
@@ -89,7 +67,6 @@ create policy "Todos leen las fotos" on public.product_images
 create policy "El administrador gestiona las fotos" on public.product_images
   for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 
--- Perfiles
 create policy "Cada usuario ve su perfil y el administrador ve todos" on public.profiles
   for select to authenticated
   using (id = (select auth.uid()) or (select public.is_admin()));
@@ -97,7 +74,6 @@ create policy "Cada usuario edita su perfil" on public.profiles
   for update to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
--- Pedidos
 create policy "El cliente ve sus pedidos y el administrador todos" on public.orders
   for select to authenticated
   using (user_id = (select auth.uid()) or (select public.is_admin()));
@@ -113,17 +89,7 @@ create policy "Ítems visibles si el pedido es visible" on public.order_items
       and (o.user_id = (select auth.uid()) or (select public.is_admin()))
   ));
 
--- -----------------------------------------------------------------------------
--- place_order: crea un pedido de forma segura (RF-005, RF-006)
---
--- p_items: [{"variant_id": "<uuid>", "quantity": 2}, ...]
--- En una sola transacción: bloquea las variantes, verifica stock, calcula los
--- totales con los precios de la base (nunca con los que manda la app), guarda
--- el pedido con copia de cada producto y descuenta el inventario.
--- Errores (para mostrarlos en la app): NO_AUTENTICADO, CARRITO_VACIO,
--- DATOS_ENVIO_INCOMPLETOS, TELEFONO_INVALIDO, COMPROBANTE_INVALIDO,
--- CANTIDAD_INVALIDA, PRODUCTO_NO_DISPONIBLE, STOCK_INSUFICIENTE.
--- -----------------------------------------------------------------------------
+-- place_order: crea el pedido validando stock y precios en el servidor. p_items = [{"variant_id": uuid, "quantity": n}]
 create or replace function public.place_order(
   p_items          jsonb,
   p_customer_name  text,
@@ -167,7 +133,6 @@ begin
     raise exception 'TELEFONO_INVALIDO' using errcode = '22023';
   end if;
 
-  -- El comprobante debe estar subido en la carpeta del propio usuario
   if p_receipt_path is null
      or split_part(p_receipt_path, '/', 1) <> v_user::text
      or not exists (select 1 from storage.objects
@@ -175,13 +140,11 @@ begin
     raise exception 'COMPROBANTE_INVALIDO' using errcode = '22023';
   end if;
 
-  -- Bloquea las variantes pedidas en orden fijo (evita bloqueos cruzados)
   perform 1 from public.product_variants
    where id in (select x.variant_id from jsonb_to_recordset(p_items) as x(variant_id uuid, quantity integer))
    order by id
    for update;
 
-  -- Revisa cantidades, existencia y stock de una vez
   select count(*), count(v.id), coalesce(sum(p.price::bigint * r.qty), 0),
          coalesce(bool_or(r.qty is null or r.qty <= 0 or r.qty > 1000), false),
          coalesce(bool_or(r.qty > v.stock), false)
@@ -232,10 +195,7 @@ begin
 end;
 $$;
 
--- -----------------------------------------------------------------------------
--- delete_order: el administrador elimina un pedido.
--- Si aún no se había entregado, las unidades vuelven al inventario.
--- -----------------------------------------------------------------------------
+-- delete_order: si el pedido no se entregó, devuelve las unidades al inventario
 create or replace function public.delete_order(p_order_id bigint)
 returns void
 language plpgsql
@@ -268,11 +228,7 @@ begin
 end;
 $$;
 
--- -----------------------------------------------------------------------------
--- delete_my_account: el usuario elimina su propia cuenta (derecho de supresión,
--- Ley 1581 de 2012). Se borran la cuenta y el perfil; los pedidos se conservan
--- como registro de la venta, sin vínculo con la cuenta.
--- -----------------------------------------------------------------------------
+-- delete_my_account: el usuario elimina su cuenta (los pedidos se conservan)
 create or replace function public.delete_my_account()
 returns void
 language plpgsql
@@ -289,24 +245,18 @@ begin
 end;
 $$;
 
--- Solo los usuarios con sesión pueden llamar a las funciones
 revoke execute on all functions in schema public from public, anon;
 grant execute on function public.is_admin() to authenticated;
 grant execute on function public.place_order(jsonb, text, text, text, text, text, text, text) to authenticated;
 grant execute on function public.delete_order(bigint) to authenticated;
 grant execute on function public.delete_my_account() to authenticated;
 
--- -----------------------------------------------------------------------------
--- Almacenamiento de archivos (Supabase Storage)
--- -----------------------------------------------------------------------------
+-- Almacenamiento: fotos de productos (público) y comprobantes (privado, carpeta por cliente)
 
--- Fotos de productos: públicas para leer
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('product-images', 'product-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do nothing;
 
--- Comprobantes de pago: PRIVADOS (dato financiero personal). JPG o PNG, máx. 10 MB.
--- Cada cliente sube a la carpeta "<su id de usuario>/..."
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('receipts', 'receipts', false, 10485760, array['image/jpeg', 'image/png'])
 on conflict (id) do nothing;
